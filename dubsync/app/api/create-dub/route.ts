@@ -1,5 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
-
+export const maxDuration = 300 // 5 minutes
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
