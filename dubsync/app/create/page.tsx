@@ -11,16 +11,14 @@ export default function CreateDub() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState('')
   const [error, setError] = useState('')
+  const [progress, setProgress] = useState('')
   const router = useRouter()
   const supabase = createClient()
 
   const handleVideo = (e: any) => {
     const file = e.target.files[0]
     if (!file) return
-    if (file.size > 10 * 1024 * 1024) {
-      setError('Video must be under 10MB!')
-      return
-    }
+    if (file.size > 10 * 1024 * 1024) { setError('Video must be under 10MB!'); return }
     setVideoFile(file)
     setVideoPreview(URL.createObjectURL(file))
     setStep(2)
@@ -30,28 +28,57 @@ export default function CreateDub() {
   const handleAudio = (e: any) => {
     const file = e.target.files[0]
     if (!file) return
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Audio must be under 5MB!')
-      return
-    }
+    if (file.size > 5 * 1024 * 1024) { setError('Audio must be under 5MB!'); return }
     setAudioFile(file)
     setStep(3)
     setError('')
+  }
+
+  const pollResult = async (id: string) => {
+    setProgress('Starting AI processing... 🤖')
+    
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 5000))
+      
+      const res = await fetch(`/api/check-dub?id=${id}`)
+      const data = await res.json()
+      
+      setProgress(`Processing... ${data.status} (${(i+1)*5}s)`)
+      
+      if (data.status === 'succeeded') {
+        setResult(data.output)
+        setLoading(false)
+        setProgress('')
+        return
+      }
+      
+      if (data.status === 'failed') {
+        setError('AI processing failed! Try a shorter video.')
+        setLoading(false)
+        setProgress('')
+        return
+      }
+    }
+    
+    setError('Timeout! Try a shorter video (under 10 seconds)')
+    setLoading(false)
+    setProgress('')
   }
 
   const handleCreate = async () => {
     if (!videoFile || !audioFile) return
     setLoading(true)
     setError('')
+    setResult('')
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
+      setProgress('Uploading files... 📤')
       const formData = new FormData()
       formData.append('video', videoFile)
       formData.append('audio', audioFile)
-      formData.append('userId', user.id)
 
       const res = await fetch('/api/create-dub', {
         method: 'POST',
@@ -59,13 +86,19 @@ export default function CreateDub() {
       })
 
       const data = await res.json()
-      if (data.error) setError(data.error)
-      else setResult(data.output)
+      
+      if (data.error) {
+        setError(data.error)
+        setLoading(false)
+        return
+      }
 
-    } catch (err) {
-      setError('Something went wrong! Try again.')
+      await pollResult(data.predictionId)
+
+    } catch (err: any) {
+      setError(err.message || 'Something went wrong!')
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const s: any = {
@@ -74,9 +107,6 @@ export default function CreateDub() {
     logo: { fontSize:'24px', fontWeight:900, color:'white', fontStyle:'italic' },
     accent: { color:'#8b5cf6' },
     back: { padding:'10px 16px', borderRadius:'12px', border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'rgba(255,255,255,0.6)', cursor:'pointer', fontSize:'14px' },
-    title: { color:'white', fontSize:'28px', fontWeight:900, marginBottom:'8px' },
-    sub: { color:'rgba(255,255,255,0.5)', marginBottom:'32px', fontSize:'15px' },
-    stepRow: { display:'flex', gap:'8px', marginBottom:'32px' },
     box: { background:'rgba(139,92,246,0.05)', border:'2px dashed rgba(139,92,246,0.3)', borderRadius:'24px', padding:'40px', textAlign:'center', marginBottom:'20px' },
     uploadBtn: { padding:'14px 28px', borderRadius:'12px', background:'rgba(139,92,246,0.2)', border:'1px solid rgba(139,92,246,0.4)', color:'#a78bfa', fontSize:'15px', fontWeight:700, cursor:'pointer' },
     createBtn: { width:'100%', padding:'18px', borderRadius:'16px', background:'linear-gradient(135deg,#8b5cf6,#a78bfa)', border:'none', color:'white', fontSize:'16px', fontWeight:800, cursor:'pointer', textTransform:'uppercase' as any, letterSpacing:'1px' },
@@ -91,37 +121,27 @@ export default function CreateDub() {
 
   return (
     <div style={s.page}>
-      {/* Header */}
       <div style={s.header}>
         <span style={s.logo}>Dub<span style={s.accent}>Sync</span></span>
         <button onClick={() => router.push('/dashboard')} style={s.back}>← Back</button>
       </div>
 
-      <h1 style={s.title}>Create Your Dub 🎤</h1>
-      <p style={s.sub}>Upload your face video + any audio = AI lip sync magic!</p>
+      <h1 style={{color:'white', fontSize:'28px', fontWeight:900, marginBottom:'8px'}}>Create Your Dub 🎤</h1>
+      <p style={{color:'rgba(255,255,255,0.5)', marginBottom:'32px'}}>Upload face video + audio = AI lip sync!</p>
 
-      {/* Steps */}
-      <div style={s.stepRow}>
+      <div style={{display:'flex', gap:'8px', marginBottom:'32px'}}>
         <div style={stepStyle(1)}>1. Video</div>
         <div style={stepStyle(2)}>2. Audio</div>
         <div style={stepStyle(3)}>3. Create</div>
       </div>
 
-      {/* Error */}
-      {error && (
-        <div style={{padding:'12px 16px', borderRadius:'12px', background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)', color:'#ef4444', marginBottom:'20px', fontSize:'14px'}}>
-          {error}
-        </div>
-      )}
+      {error && <div style={{padding:'12px', borderRadius:'12px', background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)', color:'#ef4444', marginBottom:'20px', fontSize:'14px'}}>{error}</div>}
 
-      {/* Step 1 - Video Upload */}
       {step === 1 && (
         <div style={s.box}>
           <div style={{fontSize:'48px', marginBottom:'16px'}}>🎥</div>
-          <h3 style={{color:'white', marginBottom:'8px'}}>Upload Your Face Video</h3>
-          <p style={{color:'rgba(255,255,255,0.4)', fontSize:'14px', marginBottom:'24px'}}>
-            MP4 format • Max 10MB • Clear face required
-          </p>
+          <h3 style={{color:'white', marginBottom:'8px'}}>Upload Face Video</h3>
+          <p style={{color:'rgba(255,255,255,0.4)', fontSize:'13px', marginBottom:'24px'}}>MP4 • Max 10MB • Keep it under 10 seconds!</p>
           <label style={s.uploadBtn}>
             Choose Video
             <input type="file" accept="video/*" onChange={handleVideo} style={{display:'none'}} />
@@ -129,12 +149,9 @@ export default function CreateDub() {
         </div>
       )}
 
-      {/* Step 2 - Video Preview + Audio */}
       {step >= 2 && videoPreview && (
         <div style={{marginBottom:'20px'}}>
-          <p style={{color:'rgba(255,255,255,0.6)', fontSize:'13px', marginBottom:'8px', fontWeight:700}}>
-            ✅ Video uploaded!
-          </p>
+          <p style={{color:'rgba(255,255,255,0.6)', fontSize:'13px', marginBottom:'8px', fontWeight:700}}>✅ Video ready!</p>
           <video src={videoPreview} controls style={{width:'100%', borderRadius:'16px', maxHeight:'200px'}} />
         </div>
       )}
@@ -143,9 +160,7 @@ export default function CreateDub() {
         <div style={s.box}>
           <div style={{fontSize:'48px', marginBottom:'16px'}}>🎵</div>
           <h3 style={{color:'white', marginBottom:'8px'}}>Upload Audio</h3>
-          <p style={{color:'rgba(255,255,255,0.4)', fontSize:'14px', marginBottom:'24px'}}>
-            MP3 or WAV • Max 5MB • Any voice or music
-          </p>
+          <p style={{color:'rgba(255,255,255,0.4)', fontSize:'13px', marginBottom:'24px'}}>MP3 or WAV • Max 5MB</p>
           <label style={s.uploadBtn}>
             Choose Audio
             <input type="file" accept="audio/*" onChange={handleAudio} style={{display:'none'}} />
@@ -153,19 +168,15 @@ export default function CreateDub() {
         </div>
       )}
 
-      {/* Step 3 - Create */}
       {step === 3 && (
-        <div style={{marginBottom:'20px'}}>
+        <div>
           <p style={{color:'rgba(255,255,255,0.6)', fontSize:'13px', marginBottom:'16px', fontWeight:700}}>
-            ✅ Audio uploaded: {audioFile?.name}
+            ✅ Audio: {audioFile?.name}
           </p>
 
-          {/* Result */}
           {result && (
             <div style={{marginBottom:'20px'}}>
-              <p style={{color:'#10b981', fontWeight:700, marginBottom:'8px'}}>
-                🎉 Your Dub is Ready!
-              </p>
+              <p style={{color:'#10b981', fontWeight:700, marginBottom:'8px'}}>🎉 Dub Ready!</p>
               <video src={result} controls style={{width:'100%', borderRadius:'16px'}} />
               <a href={result} download style={{display:'block', textAlign:'center', marginTop:'12px', padding:'12px', borderRadius:'12px', background:'rgba(16,185,129,0.1)', border:'1px solid rgba(16,185,129,0.3)', color:'#10b981', fontSize:'14px', fontWeight:700, textDecoration:'none'}}>
                 ⬇️ Download Dub
@@ -173,16 +184,16 @@ export default function CreateDub() {
             </div>
           )}
 
-          {!result && (
-            <button onClick={handleCreate} disabled={loading} style={{...s.createBtn, opacity: loading ? 0.7 : 1}}>
-              {loading ? '🔄 Creating your dub... (~30 sec)' : '✨ Create Dub Now!'}
-            </button>
+          {progress && (
+            <div style={{padding:'16px', borderRadius:'12px', background:'rgba(139,92,246,0.1)', border:'1px solid rgba(139,92,246,0.3)', color:'#a78bfa', marginBottom:'16px', fontSize:'14px', textAlign:'center'}}>
+              {progress}
+            </div>
           )}
 
-          {loading && (
-            <p style={{textAlign:'center', color:'rgba(255,255,255,0.4)', fontSize:'13px', marginTop:'12px'}}>
-              AI is syncing your lips... please wait 🤖
-            </p>
+          {!result && (
+            <button onClick={handleCreate} disabled={loading} style={{...s.createBtn, opacity: loading ? 0.7 : 1}}>
+              {loading ? '🔄 Processing...' : '✨ Create Dub Now!'}
+            </button>
           )}
         </div>
       )}

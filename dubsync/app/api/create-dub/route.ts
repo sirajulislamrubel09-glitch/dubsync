@@ -1,4 +1,8 @@
-export const maxDuration = 300 // 5 minutes
+export const runtime = 'nodejs'
+export const maxDuration = 60
+
+import { NextRequest, NextResponse } from 'next/server'
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -9,13 +13,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Video and audio required!' }, { status: 400 })
     }
 
-    // Convert to base64 for Replicate
-    const videoBuffer = await video.arrayBuffer()
-    const audioBuffer = await audio.arrayBuffer()
-    const videoBase64 = `data:video/mp4;base64,${Buffer.from(videoBuffer).toString('base64')}`
-    const audioBase64 = `data:audio/mp3;base64,${Buffer.from(audioBuffer).toString('base64')}`
+    const videoBuffer = Buffer.from(await video.arrayBuffer())
+    const audioBuffer = Buffer.from(await audio.arrayBuffer())
+    const videoBase64 = `data:video/mp4;base64,${videoBuffer.toString('base64')}`
+    const audioBase64 = `data:audio/mp3;base64,${audioBuffer.toString('base64')}`
 
-    // Call Replicate Wav2Lip API
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -33,23 +35,16 @@ export async function POST(request: NextRequest) {
 
     const prediction = await response.json()
 
-    // Poll for result
-    let result = prediction
-    while (result.status !== 'succeeded' && result.status !== 'failed') {
-      await new Promise(r => setTimeout(r, 3000))
-      const poll = await fetch(`https://api.replicate.com/v1/predictions/${result.id}`, {
-        headers: { 'Authorization': `Token ${process.env.REPLICATE_API_TOKEN}` }
-      })
-      result = await poll.json()
+    if (prediction.error) {
+      return NextResponse.json({ error: prediction.error }, { status: 500 })
     }
 
-    if (result.status === 'failed') {
-      return NextResponse.json({ error: 'Lip sync failed! Try again.' }, { status: 500 })
-    }
+    return NextResponse.json({ 
+      predictionId: prediction.id,
+      status: prediction.status 
+    })
 
-    return NextResponse.json({ output: result.output })
-
-  } catch (error) {
-    return NextResponse.json({ error: 'Server error!' }, { status: 500 })
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
